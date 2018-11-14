@@ -129,3 +129,62 @@ def Tsky(nu):
     """
     # TODO  -- Need some guidance here
     return 34*u.K * (nu/(408*u.MHz))**(-2.6)
+
+
+def mag2flux(mag, zp=3631.):
+    """Convert magnitudes to flux, units of mJy for default zeropoint
+
+    Parameters
+    ----------
+    mag : float or array of floats
+        Magnitude(s) to convert
+    zp : float
+        Flux zeropoint of magnitude system in units of interest.
+        Default is AB system in mJy
+
+    Returns
+    -------
+    flux : float
+        Converted flux
+    """
+    if not isinstance(mag,float):
+        flux = mag.copy()
+        flux[mag>0] = 10**(mag[mag>0]/-2.5) * zp * 1e3
+    else:
+        if mag > 0:
+            flux = 10**(mag/-2.5) * zp * 1e3
+        else:
+            flux = mag
+    return flux
+
+
+def mag2fluxerr(mag, magerr, zp=3631.):
+    """Convert magnitude errors to flux errors, units of mJy for default zeropoint
+
+    Parameters
+    ----------
+    mag : float or array of floats
+        Magnitude value(s) corresponding to error(s) to convert
+    mag : float
+        Error(s) in magnitude to convert
+    zp : float
+        Flux zeropoint of magnitude system in units of interest.
+        Default is AB system in mJy
+
+    Returns
+    -------
+    fluxerr : float or array
+        Converted flux error(s)
+    """
+    if not isinstance(mag,float):
+        fluxerr = magerr.copy()
+        try:
+            fluxerr[mag>0] = np.log(10.)*10**(-mag[mag>0]/2.5) * zp/2.5 * magerr[mag>0]* 1e3
+        except:
+            import pdb; pdb.set_trace()
+    else:
+        if mag > 0:
+            fluxerr = np.log(10.)*10**(-mag/2.5) * zp/2.5 * magerr* 1e3
+        else:
+            fluxerr = magerr
+    return fluxerr
