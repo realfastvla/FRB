@@ -6,8 +6,16 @@ import os
 from frb.surveys import images
 from frb.surveys import survey_io
 
+
 class SurveyCoord(object):
     """
+    Parent class of surveying around an input coordinate
+
+    See the children for specific methods
+
+    Args:
+        coord (SkyCoord): Coordiante for surveying around
+        radius (Angle): Search radius around the coordinate
 
     """
 
@@ -29,7 +37,7 @@ class SurveyCoord(object):
 
     def get_catalog(self):
         """
-        
+
         Returns:
             self.catalog
 
