@@ -18,6 +18,7 @@ from astropy.cosmology import Planck15
 from astropy import constants
 
 from frb import halos
+from frb import mw
 
 def fukugita04_dict():
     """
@@ -115,27 +116,41 @@ def average_He_nume(z, z_HIreion=7.):
         return neHe[0]
 
 
-def z_from_DM(DM, cosmo=None):
+def z_from_DM(DM, cosmo=None, coord=None, corr_nuisance=True):
     """
     Report back an estimated redshift from an input IGM DM
     Any contributions from the Galaxy and/or host need to have been 'removed'
 
-    Parameters
-    ----------
-    DM: Quantity
-    cosmo: astropy.cosmology, optional
+    Args:
+        DM (Quantity):
+        cosmo (astropy.cosmology, optional):
+        coord (astropy.coordinate.SkyCoord, optional):
+           If provided, use it to remove the ISM
+        corr_nuisance (bool, optional):
+            If True, correct for the MW Halo and the host with
+            100 DM units
 
-    Returns
-    -------
-    z: float
+    Returns:
+        float: Redshift
 
     """
+    if coord is not None:
+        DM_ISM = mw.ismDM(coord)
+        DM_use = DM - DM_ISM
+    else:
+        DM_use = DM
+
+    # Correct
+    if corr_nuisance:
+        DM_use -= 100 * units.pc/units.cm**3
+
     # Calculate DMs
     all_DM, zeval = average_DM(20., cosmo=cosmo, neval=20000, cumul=True)
     # Interpolate
     fint = interp1d(all_DM.value, zeval)
     # Evaluate
-    z = fint(DM.to('pc/cm**3').value)
+    z = fint(DM_use.to('pc/cm**3').value)
+    # Return
     return z
 
 
@@ -200,7 +215,7 @@ def average_DM(z, cosmo=None, cumul=False, neval=10000, mu=1.3):
         return DM_cum[-1]
 
 
-def avg_DMhalos(z, logMmin=10., f_diffuse=0.75, cumul=False):
+def avg_DMhalos(z, logMmin=10.3, f_diffuse=0.75, cumul=False):
     """
     Average DM_halos term from halos along the sightline to an FRB
 
@@ -209,6 +224,8 @@ def avg_DMhalos(z, logMmin=10., f_diffuse=0.75, cumul=False):
           Redshift of the FRB
         logMmin: float, optional
           Lowest mass halos to consider
+          Cannot be much below 10.3 or the Halo code barfs
+          The code deals with h^-1 factors, i.e. do not impose it yourself
         f_diffuse: float, optional
           Fraction of the cosmic baryon fraction in diffuse gas
         cumul: bool, optional

@@ -4,7 +4,7 @@ from __future__ import print_function, absolute_import, division, unicode_litera
 
 import numpy as np
 import os
-import pdb
+from IPython import embed
 import warnings
 
 from pkg_resources import resource_filename
@@ -12,12 +12,13 @@ from pkg_resources import resource_filename
 from astropy.coordinates import SkyCoord
 from astropy import units
 from astropy.cosmology import Planck15
-from astropy import constants
 from astropy.table import Table
 
 from frb.galaxies import defs
 from frb.galaxies import nebular
+from frb.galaxies import utils as gutils
 from frb import utils
+
 
 
 class FRBGalaxy(object):
@@ -32,7 +33,7 @@ class FRBGalaxy(object):
     Args:
         ra (float): RA in deg
         dec (float): DEC in deg
-        FRB (str): Nomiker of the FRB, e.g. 121102
+        frb (str): Nomiker of the FRB, e.g. 121102
         cosmo (astropy.cosmology): Cosmology, e.g. Planck15
 
     Attributes:
@@ -59,6 +60,10 @@ class FRBGalaxy(object):
         # Init
         slf = cls(idict['ra'], idict['dec'], idict['FRB'], **kwargs)
 
+        # FRB coord
+        if 'ra_FRB' in idict.keys():
+            slf.frb_coord = SkyCoord(ra=idict['ra_FRB'], dec=idict['dec_FRB'], unit='deg')
+
         # Check cosmology
         if slf.cosmo.name != idict['cosmo']:
             raise AssertionError("Your cosmology does not match the expected.  Gotta deal..")
@@ -80,7 +85,11 @@ class FRBGalaxy(object):
 
         # Init
         self.coord = SkyCoord(ra=ra, dec=dec, unit='deg')
-        self.frb = frb
+        self.frb = frb # Name, not coord
+
+        self.frb_coord = None
+        #
+        self.name = ''
 
         # Cosmology
         if cosmo is None:
@@ -89,13 +98,14 @@ class FRBGalaxy(object):
             self.cosmo = cosmo
 
         # Main attributes
+        self.eellipse = {}  # Error ellipse
         self.redshift = {}
         self.photom = {}
         self.morphology = {}
         self.neb_lines = {}
         self.kinematics = {}
         self.derived = {}
-        self.main_attr = ('photom', 'redshift', 'morphology', 'neb_lines', 'kinematics', 'derived')
+        self.main_attr = ('eellipse', 'photom', 'redshift', 'morphology', 'neb_lines', 'kinematics', 'derived')
 
     @property
     def z(self):
@@ -110,8 +120,45 @@ class FRBGalaxy(object):
             return None
         else:
             return self.redshift['z']
+    @property
+    def z_err(self):
+        """
+        Return the redshift error of the galaxy
 
-    def calc_nebular_AV(self, method='Ha/Hb', **kwargs):
+        Returns:
+            float or None: redshift or nadda
+
+        """
+        if len(self.redshift) == 0:
+            return None
+        else:
+            return self.redshift['z_err']
+
+    def calc_nebular_lum(self, line):
+        """
+        Calculate the line luminosity
+        Applies dust extinction if self.derived['AV_nebular'] is filled
+
+        Mainly a wrapper to nebular.calc_lum()
+
+        Args:
+            line (str):  Name of the line
+        """
+        # Checks
+        assert len(self.neb_lines) > 0
+        assert len(self.redshift) > 0
+        # Dust?
+        if 'AV_nebular' in self.derived.keys():
+            AV = self.derived['AV_nebular']
+            print("Using AV={} for a dust correction of the SFR".format(AV))
+        else:
+            print("Not making a dust correction of the SFR.  Set AV_nebular to do so or input AV to this method")
+            AV = None
+
+        Lum, Lum_err = nebular.calc_lum(self.neb_lines, line, self.z, self.cosmo, AV=AV)
+        return Lum, Lum_err
+
+    def calc_nebular_AV(self, method='Ha/Hb', min_AV=None, **kwargs):
         """
         Calculate an A_V extinction from a pair of Nebular lines
 
@@ -121,6 +168,7 @@ class FRBGalaxy(object):
 
         Args:
             method (str): Method to use
+            min_AV (float): Minimum A_V value allowed;  might set 0. someday
             **kwargs: Passed to nebular.calc_dust_extinct
 
         Returns:
@@ -130,6 +178,9 @@ class FRBGalaxy(object):
         assert len(self.neb_lines) > 0
         # Do it
         AV = nebular.calc_dust_extinct(self.neb_lines, method, **kwargs)
+        if min_AV is not None:
+            AV = max(AV, min_AV)
+        # Set
         self.derived['AV_nebular'] = AV
 
     def calc_nebular_SFR(self, method='Ha', **kwargs):
@@ -194,7 +245,7 @@ class FRBGalaxy(object):
                     if filter+'_err' in phot_tbl.keys():
                         self.photom[filter+'_err'] = phot_tbl[filter+'_err'][row]
     
-    def gen_cigale_data_in(self, ID=None,filename='data.fits',overwrite=False):
+    def gen_cigale_data_in(self, ID=None, filename='data.fits', overwrite=False):
         """
         Generates the input data file for CIGALE
         given the photometric points and redshift
@@ -210,32 +261,138 @@ class FRBGalaxy(object):
                 If true, previously written fits files will be
                 overwritten
         """
-        assert (self.photom != {}),"No photometry found. CIGALE cannot be run."
-        assert (self.redshift != {}),"No redshift found. CIGALE cannot be run"
+        assert (len(self.photom) > 0 ),"No photometry found. CIGALE cannot be run."
+        assert (len(self.redshift) > 0),"No redshift found. CIGALE cannot be run"
         new_photom = Table([self.photom])
-        if ID is None:
-            ID = "GalaxyA"
+        if ID is None and self.name !='':
+            ID = self.name
+        elif self.name=='':
+            ID = 'GalaxyA'
         new_photom['id'] = ID
         new_photom['redshift'] = self.z
         
-        #Convert DES fluxes to mJy
-        for band in defs.DES_bands:
-            colname = "DES_"+band
-            new_photom[colname] = 3630780.5*10**(new_photom[colname]/-2.5)
-            new_photom[colname+"_err"] = new_photom[colname+"_err"]/1.087*new_photom[colname]
+        # Convert DES and SDSS fluxes to mJy
+        ABmagbands = ["DES_"+band for band in defs.DES_bands]
+        ABmagbands += ["SDSS_"+band for band in defs.SDSS_bands]
+        ABmagbands += ['VLT_'+band for band in defs.VLT_bands]
+        ABmagbands += ['Pan-STARRS_'+band for band in defs.PanSTARRS_bands]
+        for band in ABmagbands:
+            if band not in self.photom.keys():
+                print("{:s} not found in the data; skipping".format(band))
+                continue
+            elif new_photom[band]<0:
+                print("{:s} doesn't have a measurement; skipping".format(band))
+                new_photom.remove_columns([band,band+'_err'])
+                continue
+            new_photom[band] = 3630780.5*10**(new_photom[band]/-2.5)
+            if new_photom[band+'_err']<0:
+                new_photom[band+'_err']=-99
+            else:
+                new_photom[band+"_err"] = new_photom[band]*(10**(new_photom[band+"_err"]/2.5)-1)
         
-        #Convert WISE fluxes to mJy
+        #REname VLT to FORS2
+        for band in defs.VLT_bands:
+            try:
+                new_photom.rename_column('VLT_'+band,'FORS2_'+band.lower())
+                new_photom.rename_column('VLT_'+band+"_err","FORS2_"+band.lower()+'_err')
+            except KeyError:
+                continue
+        
+        #Rename Pan-STARRS to PAN-STARRS
+        for band in defs.PanSTARRS_bands:
+            try:
+                new_photom.rename_column("Pan-STARRS_"+band,'PAN-STARRS_'+band)
+                new_photom.rename_column("Pan-STARRS_"+band+"_err","PAN-STARRS_"+band+"_err")
+            except KeyError:
+                continue
+        # Convert WISE fluxes to mJy
+        #TODO: Make this a function.
         wise_fnu0 = [309.54,171.787,31.674,8.363] #http://wise2.ipac.caltech.edu/docs/release/allsky/expsup/sec4_4h.html#conv2flux
         for band,zpt in zip(defs.WISE_bands,wise_fnu0):
-            new_photom[band] = zpt*10**(-new_photom[band]/2.5)
+            # Data exists??
+            if band not in self.photom.keys():
+                print("{:s} not found in the data; skipping".format(band))
+                continue
+            #
+            new_photom[band] = zpt*10**(-new_photom[band]/2.5)*1000 #mJy
             errname = band+"_err"
-            if new_photom[errname]!=-999.0:
-                new_photom[errname] =-99.0
+            if new_photom[errname] < 0:
+                new_photom[errname] = -99.0
             else:
-                new_photom[errname] = new_photom[errname]/1.087*new_photom[band]
+                new_photom[errname] = new_photom[band]*(10**(new_photom[errname]/2.5)-1)
+            new_photom.rename_column(band,band.replace("W","WISE"))
+            new_photom.rename_column(band+'_err',band.replace("W","WISE")+"_err")
+        #Convert VISTA fluxes to mJy
+        vista_fnu0 = [2087.32,1554.03,1030.40,674.83] #http://svo2.cab.inta-csic.es/svo/theory/fps3/index.php?mode=browse&gname=Paranal&gname2=VISTA
+        for band, zpt in zip(defs.VISTA_bands,vista_fnu0):
+            # Data exists??
+            if 'VISTA_'+band not in self.photom.keys():
+                print("{:s} not found in the data; skipping".format(band))
+                continue
+            #
+            new_photom['VISTA_'+band] = zpt*10**(-new_photom['VISTA_'+band]/2.5)*1000 #mJy
+            errname = 'VISTA_'+band+"_err"
+            if new_photom[errname] < 0:
+                new_photom[errname] = -99.0
+            else:
+                new_photom[errname] = new_photom['VISTA_'+band]*(10**(new_photom[errname]/2.5)-1)
         
-        #Write to file
-        new_photom.write(filename,format="fits",overwrite=overwrite)
+        # Write to file
+        try:
+            new_photom.write(filename, format="fits", overwrite=overwrite)
+        except OSError:
+            warnings.warn("File exists;  use overwrite=True if you wish")
+
+    def get_metaspec(self, instr=None, return_all=False, specdb_file=None):
+        """
+        Return the meta data and spectra for this FRBGalaxy
+        from the specDB
+
+        If there is more than one spectrum, the code returns the first
+        unless return_all=True
+
+        Args:
+            instr (str, optional):
+                Restrict to the input Instrument
+            return_all (bool, optional):
+                Return all of the meta, spectra
+            specdb_file (str, optional):
+                Path+name of the specDB file to use (over-ride the default)
+
+        Returns:
+            astropy.table.Table, linetools.spectra.XSpectrum1D: meta data, spectra
+
+        """
+
+        specDB = gutils.load_specdb(specdb_file=specdb_file)
+        if specDB is None:
+            return
+
+        # Grab the spectra
+        xspec, meta = specDB.spectra_from_coord(self.coord)
+
+        # Return all?
+        if return_all:
+            return meta, xspec
+
+        # Cut down
+        if instr is None:
+            if len(meta) > 1:
+                warnings.warn("Multiple spectra returned for this galaxy.  Taking the first, but you may wish to specify your instrument")
+                xspec = xspec[0]
+                meta = meta[0:1]
+        else:
+            idx = meta['GROUP'] == instr
+            if np.sum(idx) == 0:
+                warnings.warn("No spectrum with instrument = {}".format(instr))
+                return
+            elif np.sum(idx) > 1:
+                warnings.warn("Multiple spectra returned for this galaxy.  Taking the first, but you may wish to specify your instrument")
+            xspec = xspec[np.where(idx)[0][0]]
+            meta = meta[np.where(idx)[0][0]]
+        # Return
+        return meta, xspec
+
 
     def parse_cigale(self, cigale_file, overwrite=True):
         """
@@ -329,15 +486,14 @@ class FRBGalaxy(object):
             self.morphology['reff_kpc_err'] = \
                 (self.morphology['reff_ang_err']*units.arcsec * self.cosmo.kpc_proper_per_arcmin(self.z)).to('kpc').value
 
-
-    def parse_ppxf(self, ppxf_line_file, overwrite=True, format='ascii.ecsv'):
+    def parse_ppxf(self, ppxf_file, overwrite=True, format='ascii.ecsv'):
         """
         Parse an output pPXF file generated by our custom run
 
         Loaded into self.lines
 
         Args:
-            ppxf_line_file (str): pPXF line file
+            ppxf_file (str): pPXF results file
             overwrite (bool, optional):
             format (str, optional):  Format of the table
 
@@ -345,7 +501,7 @@ class FRBGalaxy(object):
 
         """
 
-        ppxf_tbl = Table.read(ppxf_line_file, format=format)
+        ppxf_tbl = Table.read(ppxf_file, format=format)
         names = ppxf_tbl['name'].data
         ppxf_translate = [  # Internal key,  CIGALE key
             ('Halpha', 'Halpha'),
@@ -354,7 +510,7 @@ class FRBGalaxy(object):
             ('[NII] 6584',  '[NII]6583_d'),  # [NII] 6583 flux erg/s/cm^2; pPXF
             ('[OII] 3726',  '[OII]3726'),    # [OII] flux erg/s/cm^2; pPXF
             ('[OII] 3729',  '[OII]3729'),    # [OII] flux erg/s/cm^2; pPXF
-            ('[OIII] 5007',  '[OII]5007_d')  # [OII] 5007 flux erg/s/cm^2; pPXF
+            ('[OIII] 5007',  '[OIII]5007_d')  # [OII] 5007 flux erg/s/cm^2; pPXF
         ]
 
         # Fluxes first
@@ -379,6 +535,12 @@ class FRBGalaxy(object):
                     # Try error
                     if line+'_err' in ppxf.keys():
                         self.neb_lines[line+'_err'] = ppxf[line+'_err']
+        
+        # Fitted quantities
+        self.derived['EBV_spec'] = ppxf_tbl.meta['EBV']
+        self.derived['Z_spec'] = ppxf_tbl.meta['METALS']
+        self.derived['Mstar_spec'] = 10.**ppxf_tbl.meta['LOGMSTAR']
+
 
     def set_z(self, z, origin, err=None):
         """
@@ -435,6 +597,8 @@ class FRBGalaxy(object):
             defs_list = defs.valid_derived
         elif attr == 'redshift':
             defs_list = defs.valid_z
+        elif attr == 'eellipse':
+            defs_list = defs.valid_e
         else:
             return True
         # Vet
@@ -447,7 +611,6 @@ class FRBGalaxy(object):
                 warnings.warn("{} in {} is not valid!".format(key,attr))
         # Return
         return vet
-
 
     def vet_all(self):
         """
@@ -493,6 +656,9 @@ class FRBGalaxy(object):
         Returns:
 
         """
+        # Generate path as needed
+        if not os.path.isdir(path):
+            os.mkdir(path)
         if outfile is None:
             outfile = self.make_outfile()
         # Build the dict
@@ -502,6 +668,9 @@ class FRBGalaxy(object):
         frbgal_dict['ra'] = self.coord.ra.value
         frbgal_dict['dec'] = self.coord.dec.value
         frbgal_dict['FRB'] = self.frb
+        if self.frb_coord is not None:
+            frbgal_dict['ra_FRB'] = self.frb_coord.ra.value
+            frbgal_dict['dec_FRB'] = self.frb_coord.dec.value
         frbgal_dict['cosmo'] = self.cosmo.name
 
         # Main attributes
@@ -532,12 +701,28 @@ class FRBHost(FRBGalaxy):
     Args:
         ra (float): RA in deg
         dec (float): DEC in deg
-        FRB (str): Nomiker of the FRB, e.g. 121102
-        z_frb (float, optional):  Redshift of the host, expected to be provided
+        FRB (str):
+            Nomiker of the FRB, e.g. 121102
+        z_frb (float, optional):
+            Redshift of the host, expected to be provided
 
     """
     @classmethod
     def by_name(cls, frb, **kwargs):
+        """
+        
+        Args:
+            frb (str):  FRB name with or without FRB, e.g. 180924 or FRB180924
+            **kwargs: 
+
+        Returns:
+            FRBHost:
+
+        """
+        # Strip off FRB
+        if frb[0:3] == 'FRB':
+            frb = frb[3:]
+        #
         path = os.path.join(resource_filename('frb', 'data/Galaxies/'), frb)
         json_file = os.path.join(path, FRBHost._make_outfile(frb))
         slf = cls.from_json(json_file, **kwargs)
@@ -548,6 +733,7 @@ class FRBHost(FRBGalaxy):
         super(FRBHost, self).__init__(ra, dec, frb, **kwargs)
 
         # Load up FRB info from name
+        self.name = 'HG{}'.format(self.frb)
 
         # Optional
         if z_frb is not None:
@@ -559,13 +745,18 @@ class FRBHost(FRBGalaxy):
         Static method to generate outfile based on frbname
 
         Args:
-            frbname (str):  FRB name, e.g. 121102
+            frbname (str):  FRB name, e.g. 121102 or FRB121102
 
         Returns:
             str: outfile
 
         """
-        outfile = 'FRB{}_host.json'.format(frbname)
+        if frbname[0:3] != 'FRB':
+            prefix = 'FRB'
+        else:
+            prefix = ''
+        #
+        outfile = '{}{}_host.json'.format(prefix, frbname)
         return outfile
 
     def make_outfile(self):
@@ -603,3 +794,19 @@ class FRBHost(FRBGalaxy):
         self.redshift['z_FRB'] = z
         if err is not None:
             self.redshift['z_FRB_err'] = err
+
+
+class FGGalaxy(FRBGalaxy):
+    """
+    Foreground galaxy class (child of FRBGalaxy)
+    """
+
+    def __init__(self, ra, dec, frb, **kwargs):
+        # Instantiate
+        super(FGGalaxy, self).__init__(ra, dec, frb, **kwargs)
+
+        # Load up FRB info from name
+        self.name = 'FG{}_{}'.format(self.frb, utils.name_from_coord(self.coord))
+
+
+

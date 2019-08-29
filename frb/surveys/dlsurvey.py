@@ -7,9 +7,13 @@ import pdb
 import numpy as np
 import warnings
 from astropy.table import Table
-from astropy import units, io, utils
+from astropy import units
+import warnings
+
+import sys, os
 try:
-    from dl import queryClient as qc, authClient as ac, helpers
+    from dl import queryClient as qc, authClient as ac
+    from dl.helpers.utils import convert
 except ImportError:
     print("Warning:  You need to install dl")
 
@@ -41,7 +45,7 @@ class DL_Survey(surveycoord.SurveyCoord):
     def _select_best_img(self,imgTable,verbose,timeout=120):
         pass
 
-    def get_catalog(self, query=None, query_fields=None, print_query=False):
+    def get_catalog(self, query=None, query_fields=None, print_query=False,timeout=120):
         """
         Get catalog sources around the given coordinates
         within self.radius.
@@ -61,11 +65,22 @@ class DL_Survey(surveycoord.SurveyCoord):
             query = self.query
         if print_query:
             print(query)
-        # Do it
-        result = qc.query(self.token, sql=query)
-        self.catalog = helpers.utils.convert(result, outfmt='table')
+
+# git merge debris, from my attempt to fix datalab issue
+#<<<<<<< HEAD
+#        # Do it
+#        result = qc.query(self.token, sql=query)
+#        self.catalog = helpers.utils.convert(result, outfmt='table')
 
         # TODO:: Suppress the print output from convert
+
+        # Do it while silencing print statements
+        result = qc.query(self.token, sql=query,timeout=timeout)
+        sys.stdout = open(os.devnull,"w")
+        temp = convert(result)
+        sys.stdout = sys.__stdout__
+        self.catalog = Table.from_pandas(temp)
+
         # TODO:: Dig into why the heck it doesn't want to natively
         #        output to a table when it was clearly intended to with 'outfmt=table'
         # Finish
@@ -95,7 +110,7 @@ class DL_Survey(surveycoord.SurveyCoord):
         dec = self.coord.dec.value
         fov = imsize.to(units.deg).value
         
-        if band.lower() not in self.bands:
+        if band.lower() not in self.bands and band not in self.bands:
             raise TypeError("Allowed filters (case-insensitive) for {:s} photometric bands are {}".format(self.survey,self.bands))
 
         table_cols, col_vals, bandstr = self._parse_cat_band(band)
@@ -109,6 +124,7 @@ class DL_Survey(surveycoord.SurveyCoord):
         #Select band
         selection = imgTable['obs_bandpass'].astype(str)==bandstr
 
+        #from IPython import embed; embed(header='117')
         #Select images in that band
         for column, value in zip(table_cols,col_vals):
             selection = selection & ((imgTable[column].astype(str)==value))
@@ -136,19 +152,20 @@ class DL_Survey(surveycoord.SurveyCoord):
         """
         self.cutout_size = imsize
 
-        if "r" in self.bands:
-            band = "r"
-        elif band is None:
-            band = self.bands[-1]
-            raise UserWarning("Retrieving cutout in {:s} band".format(band))
+        if band is None:
+            if "r" in self.bands:
+                band = "r"
+            elif band is None:
+                band = self.bands[-1]
+                warnings.warn("Retrieving cutout in {:s} band".format(band))
 
         img_hdu = self.get_image(imsize, band)
         if img_hdu is not None:
             self.cutout = img_hdu.data
             self.cutout_hdr = img_hdu.header
         else:
-            self.cutout = img_hdu.data
-            self.cutout_hdr = img_hdu.header
+            self.cutout = None
+            self.cutout_hdr = None
         return self.cutout, self.cutout_hdr
 
 

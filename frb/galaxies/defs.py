@@ -6,7 +6,6 @@
 
 ##############################################################
 # Redshift
-
 valid_z = [
     'z',       # Preferred redshift, may derived from one of several ways
     'z_phot',  # Photometric redshift
@@ -15,21 +14,55 @@ valid_z = [
 ]
 
 ##############################################################
+# Error Ellipse
+valid_e = [
+    'a',       # Major axis
+    'b',       # Minor axis
+    'theta',   # Rotation of the major axis E from N (deg)
+    'cl',      # Confidence level of the ellipse
+    ]
+
+##############################################################
 # Photometry
 
 # Filters
 valid_filters = []
 
+# SDSS
+SDSS_bands = ['u', 'g', 'r', 'i', 'z']
+for band in SDSS_bands:
+    valid_filters.append('SDSS_{:s}'.format(band))
+    
 # DES
 DES_bands = ['g', 'r', 'i', 'z', 'Y']
 for band in DES_bands:
     valid_filters.append('DES_{:s}'.format(band))
 
+#PanSTARRS
+PanSTARRS_bands = ['g','r','i','z','y']
+for band in PanSTARRS_bands:
+    valid_filters.append('Pan-STARRS_{:s}'.format(band))
+
+# VLT
+VLT_bands = ['g', 'I']
+for band in VLT_bands:
+    valid_filters.append('VLT_{:s}'.format(band))
+
 # WISE
 WISE_bands = ['W1', 'W2', 'W3', 'W4']
 for band in WISE_bands:
     valid_filters.append('{:s}'.format(band))
-    
+
+# GMOS
+GMOS_bands = ['u', 'g', 'r', 'i', 'z']
+for band in GMOS_bands:
+    valid_filters.append('GMOS_{:s}'.format(band))
+
+# VISTA (VIRCAM)
+VISTA_bands = ['Y','J','H','Ks']
+for band in VISTA_bands:
+    valid_filters.append('VISTA_{:s}'.format(band))
+
 valid_photom = valid_filters
 
 ##############################################################
@@ -63,13 +96,16 @@ valid_morphology = [
 
 valid_derived_photom = [
     'Mstar',           # Stellar mass; linear in Msun CIGALE
+    'Mstar_spec',      # Stellar mass from pPXF; linear in Msun
     'f_AGN',           # Fraction of AGN contribution to light; CIGALE
     'u-r',             # Rest-frame; CIGALE
     'Lnu_r',           # Specific luminosity (J/s/Hz); CIGALE; cosmology dependent
     'M_r',             # Absolute magnitude, r-band rest-frame; CIGALE+
     'SFR_photom',      # SFR in Msun/yr from photometry; CIGALE
     'EBV_photom',      # E(B-V) from photometry; CIGALE
+    'EBV_spec',        # E(B-V) from spectral SED; pPXF
     'Z_photom',        # Metallicity from photometry; CIGALE
+    'Z_spec',          # Metallicity from spectra; pPXF
     ]
 
 valid_derived_nebular = [
