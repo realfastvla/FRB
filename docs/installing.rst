@@ -44,11 +44,30 @@ out all the packages and their version numbers.
 The following packages are required to access surveys (e.g. SDSS, DES)
 for data that may be associated to an FRB:
 
-* `astroquery <https://astroquery.readthedocs.io/en/latest/>`_ v3.8 (v3.9 currently fails)
-* `datalab-client < https://github.com/noaodatalab/datalab/>`_ v1.1 or later
+* `astroquery <https://astroquery.readthedocs.io/en/latest/>`_ v0.3.8 (v0.3.9 currently fails)
+* `datalab-client <https://github.com/noaodatalab/datalab/>`_ v1.1 or later
 * `pyvo <https://pyvo.readthedocs.io/en/latest/>`_  version 0.9.2 or later
 * `PIL <https://pillow.readthedocs.io/en/5.3.x/>`_  version 5.3 or later (only for SDSS cutouts)
 * `requests <https://pillow.readthedocs.io/en/5.3.x/>`_  version 2.18 or later
+
+The following are required to run spectral line analysis (e.g. frb.galaxies.nebular):
+
+* `linetools <https://github.com/linetools/linetools>`_  version 0.3 or later
+
+The following are required to run some of the halo codes:
+
+* `hmf_emulator <https://github.com/profxj/hmf_emulator.git>`_  WARNING: This is JXP's fork.
+* george :: Use pip
+* `class <https://github.com/lesgourg/class_public>`_ version 2.7 or greater
+
+The following are required to build host galaxy objects:
+
+* `pPXF <https://pypi.org/project/ppxf/>`_ version 6.7 or greater
+
+For pPXF, you will also likely need to modify the standard install
+to use the Chabrier libraries.  See the InstallNotes in this
+`Google Drive <https://drive.google.com/drive/folders/1_nu8IiBm0-dnkpoKBcoXyQuqbsrYHNXh?usp=sharing>`_.
+
 
 Installing frb
 ==============
